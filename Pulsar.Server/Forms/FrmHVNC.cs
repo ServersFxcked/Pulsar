@@ -220,45 +220,66 @@ namespace Pulsar.Server.Forms
         /// </summary>
         /// <param name="sender">The message handler which raised the event.</param>
         /// <param name="bmp">The new desktop image to draw.</param>
-        private Stopwatch _stopwatch = new Stopwatch();
-        private int _frameCount = 0;
+        private Stopwatch _sizeUpdateStopwatch = new Stopwatch();
+        private const double SizeUpdateIntervalSeconds = 1.0;
 
         private void UpdateImage(object sender, Bitmap bmp)
         {
-            if (!_stopwatch.IsRunning)
+            // Prioritize rendering the image
+            picDesktop.UpdateImage(bmp, false);
+
+            // Offload size calculation and UI update to a background thread
+            // and throttle it to roughly once per second.
+            if (!_sizeUpdateStopwatch.IsRunning || _sizeUpdateStopwatch.Elapsed.TotalSeconds >= SizeUpdateIntervalSeconds)
             {
-                _stopwatch.Start();
-            }
-
-            _frameCount++;
-
-            double elapsedSeconds = _stopwatch.Elapsed.TotalSeconds;
-
-            if (elapsedSeconds >= 1.0)
-            {
-                _frameCount = 0;
-                _stopwatch.Restart();
-            }
-
-            if (_frameCount >= UpdateInterval)
-            {
-                _frameCount = 0;
-
-                long sizeInBytes = 0;
-                using (MemoryStream ms = new MemoryStream())
+                _sizeUpdateStopwatch.Restart();
+                // Clone the bitmap for use in the background thread to avoid issues if the original bmp is disposed
+                Bitmap clonedBmp = null;
+                try
                 {
-                    bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Jpeg);
-                    sizeInBytes = ms.Length;
+                    clonedBmp = (Bitmap)bmp.Clone();
                 }
-                double sizeInKB = sizeInBytes / 1024.0;
-
-                this.Invoke((MethodInvoker)delegate
+                catch (Exception ex)
                 {
-                    sizeLabelCounter.Text = $"Size: {sizeInKB:0.00} KB";
+                    System.Diagnostics.Debug.WriteLine($"Error cloning bitmap for size update: {ex.Message}");
+                    // If cloning fails, we can't proceed with this update cycle for size.
+                    return;
+                }
+
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        long sizeInBytes = 0;
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            clonedBmp.Save(ms, System.Drawing.Imaging.ImageFormat.Jpeg);
+                            sizeInBytes = ms.Length;
+                        }
+                        double sizeInKB = sizeInBytes / 1024.0;
+
+                        if (this.IsHandleCreated && !this.IsDisposed)
+                        {
+                            this.Invoke((MethodInvoker)delegate
+                            {
+                                if (sizeLabelCounter != null && !sizeLabelCounter.IsDisposed)
+                                {
+                                    sizeLabelCounter.Text = $"Size: {sizeInKB:0.00} KB";
+                                }
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Log or handle exceptions from the background task
+                        System.Diagnostics.Debug.WriteLine($"Error calculating image size or updating UI: {ex.Message}");
+                    }
+                    finally
+                    {
+                        clonedBmp?.Dispose(); // Ensure the cloned bitmap is disposed
+                    }
                 });
             }
-
-            picDesktop.UpdateImage(bmp, false);
         }
 
         private void FrmRemoteDesktop_Load(object sender, EventArgs e)

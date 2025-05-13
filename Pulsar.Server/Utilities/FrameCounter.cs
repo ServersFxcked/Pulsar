@@ -25,6 +25,7 @@ namespace Pulsar.Server.Utilities
         public const int MAXIMUM_SAMPLES = 100;
 
         private Queue<float> _sampleBuffer = new Queue<float>();
+        private float _currentSampleSum = 0f; // Add this line
 
         public event FrameUpdatedEventHandler FrameUpdated;
 
@@ -34,15 +35,14 @@ namespace Pulsar.Server.Utilities
 
             _sampleBuffer.Enqueue(currentFramesPerSecond);
 
-            if (_sampleBuffer.Count > MAXIMUM_SAMPLES)
+            if (_sampleBuffer.Count == MAXIMUM_SAMPLES) // Check if buffer is full before dequeueing
             {
-                _sampleBuffer.Dequeue();
-                AverageFramesPerSecond = _sampleBuffer.Average(i => i);
+                _currentSampleSum -= _sampleBuffer.Dequeue(); // Subtract the oldest sample from the sum
             }
-            else
-            {
-                AverageFramesPerSecond = currentFramesPerSecond;
-            }
+            _sampleBuffer.Enqueue(currentFramesPerSecond);
+            _currentSampleSum += currentFramesPerSecond; // Add the new sample to the sum
+
+            AverageFramesPerSecond = _currentSampleSum / _sampleBuffer.Count; // Calculate average
 
             OnFrameUpdated(new FrameUpdatedEventArgs(AverageFramesPerSecond));
 
