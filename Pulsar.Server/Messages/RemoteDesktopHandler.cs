@@ -333,7 +333,10 @@ namespace Pulsar.Server.Messages
                 Interlocked.Decrement(ref _pendingFrames);
             }
 
-            if (IsBufferedMode && (message.IsLastRequestedFrame || _pendingFrames <= 1))
+            // Request more frames if pending frames are low to keep the stream flowing
+            // We use a threshold slightly less than the typical batch to encourage continuous flow.
+            int requestThreshold = Math.Max(1, _defaultFrameRequestBatch -1); // e.g., if batch is 3, threshold is 2. If 2, threshold is 1.
+            if (IsBufferedMode && _pendingFrames <= requestThreshold)
             {
                 await RequestMoreFramesAsync();
             }
