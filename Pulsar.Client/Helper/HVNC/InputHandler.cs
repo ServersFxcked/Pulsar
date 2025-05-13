@@ -208,7 +208,7 @@ namespace Pulsar.Client.Helper.HVNC
         public void Dispose()
         {
             CloseDesktop(this.Desktop);
-            GC.Collect();
+            // GC.Collect(); // Removed
         }
 
         #endregion

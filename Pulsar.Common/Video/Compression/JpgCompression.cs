@@ -14,9 +14,9 @@ namespace Pulsar.Common.Video.Compression
         {
             EncoderParameter parameter = new EncoderParameter(Encoder.Quality, quality);
             this._encoderInfo = GetEncoderInfo("image/jpeg");
-            this._encoderParams = new EncoderParameters(2);
+            this._encoderParams = new EncoderParameters(1); // Only one parameter now
             this._encoderParams.Param[0] = parameter;
-            this._encoderParams.Param[1] = new EncoderParameter(Encoder.Compression, (long)EncoderValue.CompressionRle);
+            // Removed: this._encoderParams.Param[1] = new EncoderParameter(Encoder.Compression, (long)EncoderValue.CompressionRle);
         }
 
         public void Dispose()

